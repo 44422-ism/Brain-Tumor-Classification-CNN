@@ -3,5 +3,3 @@ streamlit
 numpy
 pandas
 pillow
-opencv-python-headless
-matplotlib
