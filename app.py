@@ -44,15 +44,19 @@ tumor_interpreter = load_tflite_model(TUMOR_MODEL_PATH)
 # Functions
 # -------------------------------
 def preprocess_image(img, input_shape=(224,224,3)):
+    # Ensure RGB
     if img.mode != "RGB":
         img = img.convert("RGB")
+    # Resize to model input size
     img = img.resize((input_shape[1], input_shape[0]))
+    # Normalize and expand dims
     arr = np.array(img).astype('float32') / 255.0
     arr = np.expand_dims(arr, axis=0)
     return arr
 
 def predict_tumor(uploaded_file):
     img = Image.open(uploaded_file)
+    # Use correct input shape
     img_array = preprocess_image(img, input_shape=(224,224,3))
 
     input_details = tumor_interpreter.get_input_details()
@@ -98,7 +102,7 @@ st.set_page_config(page_title="Brain Tumor Classifier", layout="wide")
 st.title("🧠 Brain Tumor Classification")
 
 st.markdown("""
-**Disclaimer:** This tool is for educational purposes only. Predictions are based on a trained model and are not 100% accurate. Always consult a medical professional.
+**Disclaimer:** These Predictions are based on a trained model and are not 100% accurate. Always consult a medical professional.
 """)
 
 uploaded_file = st.file_uploader("Upload MRI image (jpg/png)", type=["jpg","jpeg","png"])
