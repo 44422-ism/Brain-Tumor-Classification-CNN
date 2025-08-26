@@ -43,7 +43,7 @@ tumor_interpreter = load_tflite_model(TUMOR_MODEL_PATH)
 # -------------------------------
 # Functions
 # -------------------------------
-def preprocess_image(img, input_shape=(128,128,3)):
+def preprocess_image(img, input_shape=(224,224,3)):
     if img.mode != "RGB":
         img = img.convert("RGB")
     img = img.resize((input_shape[1], input_shape[0]))
@@ -53,7 +53,7 @@ def preprocess_image(img, input_shape=(128,128,3)):
 
 def predict_tumor(uploaded_file):
     img = Image.open(uploaded_file)
-    img_array = preprocess_image(img, input_shape=(128,128,3))
+    img_array = preprocess_image(img, input_shape=(224,224,3))
 
     input_details = tumor_interpreter.get_input_details()
     output_details = tumor_interpreter.get_output_details()
