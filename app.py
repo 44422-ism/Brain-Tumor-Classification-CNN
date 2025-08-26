@@ -103,7 +103,7 @@ def get_google_maps_link(hospital_name, location):
 st.set_page_config(page_title="Brain Tumor Classifier", layout="wide")
 st.title("🧠 Brain Tumor Classification")
 st.markdown("""
-**Disclaimer:** This tool is for educational purposes only. Predictions are based on a trained model and are not 100% accurate. Always consult a medical professional.
+**Disclaimer:** Predictions are based on a trained model and are not 100% accurate. Always consult a medical professional for cross examination.
 """)
 
 # Sidebar Widgets
