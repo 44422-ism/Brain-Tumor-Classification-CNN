@@ -1,138 +1,139 @@
 import streamlit as st
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image
 import tensorflow as tf
 import pandas as pd
 
-# === PAGE CONFIG ===
-st.set_page_config(page_title="Brain Tumor Classification + MRI Detector", layout="wide")
-st.title("🧠 Brain Tumor Classification + MRI Detector")
-st.markdown("""
-Upload MRI images to detect tumors and classify them as Brain MRI / Other MRI / Not MRI.
+# -------------------------------
+# Constants
+# -------------------------------
+TUMOR_MODEL_PATH = "tumor_model.tflite"
+TUMOR_CLASSES = ['No Tumor', 'Glioma', 'Pituitary', 'Meningioma']
 
-⚠ **Note:** Predictions are based on trained models and may **not be 100% accurate**. Always consult a medical professional.
-""")
+# Hospital recommendations
+HOSPITALS = {
+    "New Delhi, India": ["AIIMS", "Max Super Speciality Hospital"],
+    "Mumbai, India": ["Tata Memorial Hospital", "Lilavati Hospital"],
+    "Bangalore, India": ["Manipal Hospital", "Apollo Hospital"],
+    "Chennai, India": ["Apollo Specialty Hospital", "Fortis Malar Hospital"],
+    "Hyderabad, India": ["Yashoda Hospital", "Care Hospital"],
+    "London, UK": ["The Royal London Hospital", "King's College Hospital"],
+    "Paris, France": ["Pitié-Salpêtrière Hospital", "Cochin Hospital"],
+    "Berlin, Germany": ["Charité – Universitätsmedizin Berlin", "Helios Klinikum Berlin-Buch"],
+    "Rome, Italy": ["Policlinico Gemelli", "Ospedale San Camillo"],
+    "Madrid, Spain": ["Hospital Universitario La Paz", "Hospital 12 de Octubre"],
+    "New York, USA": ["Memorial Sloan Kettering", "NYU Langone Health"],
+    "Los Angeles, USA": ["UCLA Medical Center", "Cedars-Sinai Medical Center"],
+    "Chicago, USA": ["Northwestern Memorial Hospital", "Rush University Medical Center"],
+    "Toronto, Canada": ["Toronto General Hospital", "Sunnybrook Health Sciences Centre"],
+    "Sydney, Australia": ["Royal Prince Alfred Hospital", "Sydney Adventist Hospital"]
+}
 
-# === MODEL PATHS ===
-MRI_MODEL_PATH = "multi_class_mri_detector.tflite"
-TUMOR_MODEL_PATH = "tumor_classifier_with_unknown.tflite"
-
-# === LABELS ===
-MRI_CLASSES = ["Brain MRI", "Other MRI", "Not MRI"]
-TUMOR_CLASSES = ["Glioma", "Meningioma", "Pituitary", "No Tumor", "Unknown"]
-
-# === LOAD TFLITE MODELS ===
+# -------------------------------
+# Load TFLite Model
+# -------------------------------
 @st.cache_resource
 def load_tflite_model(model_path):
     interpreter = tf.lite.Interpreter(model_path=model_path)
     interpreter.allocate_tensors()
     return interpreter
 
-mri_interpreter = load_tflite_model(MRI_MODEL_PATH)
 tumor_interpreter = load_tflite_model(TUMOR_MODEL_PATH)
 
-# === IMAGE PREPROCESSING ===
-def preprocess_image(img, interpreter):
-    input_shape = interpreter.get_input_details()[0]['shape']
-    h, w, c = input_shape[1], input_shape[2], input_shape[3]
-
-    if img.mode != "RGB" and c == 3:
+# -------------------------------
+# Functions
+# -------------------------------
+def preprocess_image(img, input_shape=(128,128,3)):
+    if img.mode != "RGB":
         img = img.convert("RGB")
-    elif img.mode != "L" and c == 1:
-        img = img.convert("L")
-
-    img = img.resize((w,h))
+    img = img.resize((input_shape[1], input_shape[0]))
     arr = np.array(img).astype('float32') / 255.0
     arr = np.expand_dims(arr, axis=0)
-
-    if arr.shape[-1] != c:
-        arr = np.repeat(arr, c, axis=-1)
-
     return arr
 
-# === PREDICTION ===
-def predict_tflite(interpreter, img_array):
-    input_details = interpreter.get_input_details()
-    output_details = interpreter.get_output_details()
-    interpreter.set_tensor(input_details[0]['index'], img_array)
-    interpreter.invoke()
-    return interpreter.get_tensor(output_details[0]['index'])[0]
+def predict_tumor(uploaded_file):
+    img = Image.open(uploaded_file)
+    img_array = preprocess_image(img, input_shape=(128,128,3))
 
-# === SLIDING WINDOW PATCHES ===
-def extract_patches(img, patch_size=224, stride=112):
-    w, h = img.size
-    patches = []
-    positions = []
-    for y in range(0, h - patch_size + 1, stride):
-        for x in range(0, w - patch_size + 1, stride):
-            patch = img.crop((x, y, x + patch_size, y + patch_size))
-            patches.append(patch)
-            positions.append((x,y))
-    if len(patches) == 0:
-        patches = [img.resize((patch_size, patch_size))]
-        positions = [(0,0)]
-    return patches, positions
+    input_details = tumor_interpreter.get_input_details()
+    output_details = tumor_interpreter.get_output_details()
 
-# === HEATMAP GENERATION ===
-def generate_heatmap(img, positions, confidences, patch_size=224, min_conf=0.5):
-    heat = Image.new("RGBA", img.size)
-    for (x,y), conf in zip(positions, confidences):
-        if conf >= min_conf:
-            overlay = Image.new("RGBA", (patch_size, patch_size), (255,0,0,int(conf*150)))
-            heat.paste(overlay, (x,y), overlay)
-    return Image.alpha_composite(img.convert("RGBA"), heat)
+    tumor_interpreter.set_tensor(input_details[0]['index'], img_array)
+    tumor_interpreter.invoke()
+    preds = tumor_interpreter.get_tensor(output_details[0]['index'])[0]
 
-# === FILE UPLOAD ===
-uploaded_files = st.file_uploader("Upload MRI images", type=["jpg","jpeg","png"], accept_multiple_files=True)
-results = []
+    # Fix if output length differs
+    if len(preds) != len(TUMOR_CLASSES):
+        preds_fixed = np.zeros(len(TUMOR_CLASSES))
+        for i in range(min(len(preds), len(TUMOR_CLASSES))):
+            preds_fixed[i] = preds[i]
+        preds = preds_fixed
 
-if uploaded_files:
-    for file in uploaded_files:
-        st.divider()
-        st.subheader(f"📂 {file.name}")
-        img = Image.open(file)
-        st.image(img, caption="Uploaded Image", use_column_width=True)
+    label_index = int(np.argmax(preds))
+    label = TUMOR_CLASSES[label_index]
+    conf_score = float(preds[label_index])
 
-        # === MRI DETECTION (display only) ===
-        img_array = preprocess_image(img, mri_interpreter)
-        mri_pred = predict_tflite(mri_interpreter, img_array)
-        mri_conf = mri_pred.max()
-        mri_label = MRI_CLASSES[np.argmax(mri_pred)]
-        st.write(f"MRI Prediction: {mri_label} (Confidence: {mri_conf:.2f})")
+    # Summary table
+    summary_df = pd.DataFrame({
+        'Class': TUMOR_CLASSES,
+        'Probability': [float(p) for p in preds]
+    }).sort_values(by='Probability', ascending=False)
 
-        # === TUMOR DETECTION (always run) ===
-        patches, positions = extract_patches(img)
-        patch_confidences = []
-        patch_preds = []
-        for patch in patches:
-            patch_arr = preprocess_image(patch, tumor_interpreter)
-            pred = predict_tflite(tumor_interpreter, patch_arr)
-            patch_preds.append(pred)
-            patch_confidences.append(pred.max())
-        patch_preds = np.array(patch_preds)
-        mean_conf = patch_preds.mean(axis=0)
-        tumor_label = TUMOR_CLASSES[np.argmax(mean_conf)]
-        tumor_conf = mean_conf.max()
+    # Tumor descriptive info
+    tumor_info_dict = {
+        "No Tumor": "No detectable brain tumor in the scan.",
+        "Glioma": "Gliomas are tumors originating in glial cells. Can be low or high grade.",
+        "Meningioma": "Meningiomas develop from the meninges, the brain's protective layers.",
+        "Pituitary": "Pituitary tumors form in the pituitary gland affecting hormonal balance.",
+        "Uncertain": "Prediction is uncertain. Please consult a specialist."
+    }
+    info = tumor_info_dict.get(label, "No info available.")
 
-        st.write(f"Tumor Prediction: {tumor_label} (Confidence: {tumor_conf:.2f})")
+    return label, conf_score, summary_df, info
 
-        # === HEATMAP ===
-        heatmap_img = generate_heatmap(img, positions, patch_confidences, min_conf=0.5)
-        st.image(heatmap_img, caption="Tumor Heatmap Overlay", use_column_width=True)
+# -------------------------------
+# Streamlit Layout
+# -------------------------------
+st.set_page_config(page_title="Brain Tumor Classifier", layout="wide")
+st.title("🧠 Brain Tumor Classification")
 
-        # === RECORD RESULTS ===
-        results.append({
-            "File Name": file.name,
-            "MRI Type": mri_label,
-            "MRI Confidence": round(float(mri_conf),2),
-            "Tumor Type": tumor_label,
-            "Tumor Confidence": round(float(tumor_conf),2)
-        })
+st.markdown("""
+**Disclaimer:** This tool is for educational purposes only. Predictions are based on a trained model and are not 100% accurate. Always consult a medical professional.
+""")
 
-    # === SUMMARY TABLE ===
-    st.subheader("📊 Summary Table")
-    df = pd.DataFrame(results)
-    st.table(df)
+uploaded_file = st.file_uploader("Upload MRI image (jpg/png)", type=["jpg","jpeg","png"])
 
-else:
-    st.warning("Please upload one or more MRI images to get predictions.")
+# Sidebar widgets
+st.sidebar.header("📊 Scan History & Info")
+scan_history = st.sidebar.empty()
+tumor_info_widget = st.sidebar.empty()
+st.sidebar.header("🏥 Hospital Recommendations")
+location_input = st.sidebar.text_input("Enter your city and country (e.g., New Delhi, India)")
+
+# Display top hospitals
+if location_input:
+    top_hospitals = HOSPITALS.get(location_input, ["Location not found. Choose from predefined locations."])
+    st.sidebar.write("Top Hospitals:")
+    for h in top_hospitals:
+        st.sidebar.write(f"- {h}")
+
+# -------------------------------
+# Prediction
+# -------------------------------
+if uploaded_file:
+    try:
+        label, conf_score, summary, info = predict_tumor(uploaded_file)
+
+        st.write(f"**Predicted Class:** {label}")
+        st.write(f"**Confidence Score:** {conf_score:.2f}")
+
+        # Display summary table
+        st.subheader("Prediction Summary")
+        st.dataframe(summary)
+
+        # Update sidebar widgets
+        scan_history.markdown(f"**Last Scan:** {uploaded_file.name} - {label} ({conf_score:.2f})")
+        tumor_info_widget.markdown(f"**Tumor Info:** {info}")
+
+    except Exception as e:
+        st.error(f"Prediction failed: {e}")
