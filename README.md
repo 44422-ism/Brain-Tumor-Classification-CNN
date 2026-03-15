@@ -100,6 +100,7 @@ This prototype demonstrates how **AI in healthcare** can help in:
 * Early detection of brain tumors.
 * Supporting radiologists with **decision assistance**.
 * Laying the foundation for **accessible and scalable diagnostic tools**.
+* 
 
 ---
 
